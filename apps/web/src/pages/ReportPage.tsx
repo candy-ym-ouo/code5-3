@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
+import type { CalibrationSummary } from '@shanhai/contracts';
 import { api } from '../api.ts';
 import { useGame } from '../game-context.tsx';
 
@@ -103,7 +104,58 @@ export function ReportPage() {
           </ol>
         </div>
       </section>
+
+      {data.calibration && <CalibrationSection calibration={data.calibration} />}
     </div>
+  );
+}
+
+function CalibrationSection({ calibration }: { calibration: CalibrationSummary }) {
+  return (
+    <section className="document-section">
+      <div className="section-heading">
+        <div><p className="eyebrow">ENVIRONMENT CALIBRATION</p><h2>环境记录校准</h2></div>
+        <span>新口径 v2：仪器误差 · 天气突变 · 区域基线</span>
+      </div>
+      <div className="report-overview calibration-overview">
+        <div className="big-number">
+          <span>新口径记录均分</span>
+          <strong>{calibration.averageScore.toFixed(1)}</strong>
+          <small>{calibration.calibratedCount} 条</small>
+        </div>
+        <div className="report-callout">
+          <span>天气突变放宽</span>
+          <strong>{calibration.weatherShockCount} 次</strong>
+        </div>
+        <div className="report-callout">
+          <span>区域基线托底</span>
+          <strong>{calibration.baselineAnchoredCount} 次</strong>
+        </div>
+        <div className="report-callout">
+          <span>旧口径记录（保原口径）</span>
+          <strong>{calibration.legacyCount} 条</strong>
+        </div>
+      </div>
+      {calibration.bySite.length > 0 && (
+        <div className="bar-chart">
+          {calibration.bySite.map((site) => (
+            <div className="bar-row" key={site.siteId}>
+              <span>{site.siteName}</span>
+              <div className="bar-track">
+                <span className="bar-positive" style={{ width: `${Math.max(3, site.averageScore)}%` }} />
+              </div>
+              <strong className="positive">{site.averageScore.toFixed(1)}</strong>
+              <small>{site.count} 条</small>
+            </div>
+          ))}
+        </div>
+      )}
+      {calibration.shocks.length > 0 && (
+        <ul className="insight-list">
+          {calibration.shocks.map((shock) => <li key={shock}>天气突变窗口：{shock}</li>)}
+        </ul>
+      )}
+    </section>
   );
 }
 

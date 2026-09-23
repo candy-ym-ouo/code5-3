@@ -72,7 +72,10 @@ export function SpeciesPage() {
               <article key={entry.id}>
                 <span>{entry.year} 年 · {SEASON_LABELS[entry.season as keyof typeof SEASON_LABELS] ?? entry.season}季 · 第 {entry.day} 日</span>
                 <strong>{entry.score.toFixed(0)} 分</strong>
-                <small>{String(entry.feedback.message ?? '记录已保存')}</small>
+                <small>
+                  {String(entry.feedback.version ?? 'v1') === 'v2' ? '校准口径 v2 · ' : '旧口径 v1 · '}
+                  {String(entry.feedback.message ?? '记录已保存')}
+                </small>
               </article>
             ))}
           </div>

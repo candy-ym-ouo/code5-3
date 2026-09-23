@@ -94,6 +94,8 @@ CREATE TABLE IF NOT EXISTS observations (
   score REAL NOT NULL,
   feedback_json TEXT NOT NULL,
   note TEXT NOT NULL DEFAULT '',
+  score_version TEXT NOT NULL DEFAULT 'v1',
+  calibration_json TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL
 );
 

@@ -26,6 +26,17 @@ export function ReviewPanel({
         <ul className="review-list">
           {world.seasonReview.changes.map((change) => <li key={change}>{change}</li>)}
         </ul>
+        {world.seasonReview.calibration && (
+          <div className="review-calibration">
+            <p className="eyebrow">ENVIRONMENT CALIBRATION · v2</p>
+            <div className="review-stats">
+              <Metric label="新口径均分" value={world.seasonReview.calibration.averageScore} />
+              <Metric label="天气突变" value={world.seasonReview.calibration.weatherShockCount} alert={world.seasonReview.calibration.weatherShockCount > 0} />
+              <Metric label="基线托底" value={world.seasonReview.calibration.baselineAnchoredCount} />
+              <Metric label="旧口径保留" value={world.seasonReview.calibration.legacyCount} />
+            </div>
+          </div>
+        )}
         <button className="button button-primary" type="button" onClick={onContinueSeason} disabled={busy}>
           进入{SEASON_LABELS[nextSeason(world.season)]}季
         </button>
@@ -40,6 +51,13 @@ export function ReviewPanel({
         <p className="eyebrow">ANNUAL REPORT · YEAR {report.year}</p>
         <h2>{report.headline}</h2>
         <p className="review-lead">全图种群变化 {formatPercent(report.populationChangePercent)}，错误采集 {report.incorrectSamples} 次。</p>
+        {report.calibration && (
+          <p className="review-lead">
+            环境校准 v2：{report.calibration.calibratedCount} 条记录均分 {report.calibration.averageScore}，
+            天气突变 {report.calibration.weatherShockCount} 次，基线托底 {report.calibration.baselineAnchoredCount} 次
+            {report.calibration.legacyCount > 0 ? `，旧口径保留 ${report.calibration.legacyCount} 条` : ''}。
+          </p>
+        )}
         <div className="report-mini-grid">
           {report.speciesChanges.slice(0, 6).map((change) => (
             <article key={change.speciesId}>

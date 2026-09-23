@@ -20,6 +20,17 @@ export class Store {
     if (!columns.some((column) => column.name === 'slot')) {
       this.db.exec('ALTER TABLE samples ADD COLUMN slot INTEGER NOT NULL DEFAULT 1');
     }
+
+    // 环境记录校准：旧记录保留原口径（v1）与原分数，新记录写入 v2 校准明细。
+    const observationColumns = this.db
+      .prepare('PRAGMA table_info(observations)')
+      .all() as unknown as Array<{ name: string }>;
+    if (!observationColumns.some((column) => column.name === 'score_version')) {
+      this.db.exec(`ALTER TABLE observations ADD COLUMN score_version TEXT NOT NULL DEFAULT 'v1'`);
+    }
+    if (!observationColumns.some((column) => column.name === 'calibration_json')) {
+      this.db.exec(`ALTER TABLE observations ADD COLUMN calibration_json TEXT NOT NULL DEFAULT ''`);
+    }
   }
 
   transaction<T>(operation: () => T): T {

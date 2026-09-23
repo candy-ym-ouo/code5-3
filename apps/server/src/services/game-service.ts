@@ -1,6 +1,8 @@
 import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
 import type {
   AnnualReview,
+  CalibrationSummary,
+  CalibrationView,
   GameCommand,
   GamePhase,
   JournalEntry,
@@ -19,6 +21,7 @@ import {
   CATALOG_VERSION,
   createSpeciesState,
   disperseSpecies,
+  ENVIRONMENT_WEIGHTS,
   evaluateSample,
   evolveSeason,
   generateSiteState,
@@ -27,10 +30,14 @@ import {
   getStatus,
   getSuitability,
   nextSeason,
+  PLANT_ENVIRONMENT_WEIGHTS,
   round,
+  scoreCalibratedEnvironment,
   SPECIES_BY_ID,
   SITES,
   SITES_BY_ID,
+  type CalibrationResult,
+  type EnvironmentMetricKey,
   type SiteState,
   type SpeciesState
 } from '@shanhai/game-core';
@@ -224,6 +231,9 @@ export class GameService {
       const speciesId = stringOrNull(row.species_id);
       const definition = speciesId ? SPECIES_BY_ID.get(speciesId) : undefined;
       const values = parseJson<Record<string, unknown>>(String(row.values_json), {});
+      const scoreVersion = String(row.score_version ?? 'v1') === 'v2' ? 'v2' as const : 'v1' as const;
+      const calibration =
+        scoreVersion === 'v2' ? parseCalibration(String(row.calibration_json ?? '')) : null;
       return {
         id: String(row.id),
         kind: row.kind === 'environment' ? 'environment' : 'plant',
@@ -236,9 +246,11 @@ export class GameService {
         speciesId,
         speciesName: definition?.name ?? null,
         score: Number(row.score),
+        scoreVersion,
         note: String(row.note ?? ''),
         createdAt: String(row.created_at),
-        details: values
+        details: values,
+        calibration
       };
     });
 
@@ -256,6 +268,7 @@ export class GameService {
         speciesId,
         speciesName: SPECIES_BY_ID.get(speciesId)?.name ?? speciesId,
         score: null,
+        scoreVersion: 'v1',
         note: '',
         createdAt: String(row.created_at),
         details: {
@@ -263,7 +276,8 @@ export class GameService {
           methodLabel: SAMPLE_LABELS[String(row.method) as SampleMethod] ?? String(row.method),
           protocolMatch: Boolean(row.protocol_match),
           effects: parseJson<Record<string, unknown>>(String(row.effects_json), {})
-        }
+        },
+        calibration: null
       });
     }
 
@@ -590,12 +604,34 @@ export class GameService {
     }
 
     const presentation = getPlantPresentation(definition, state, save.season, save.day);
-    const score = scorePlantObservation(presentation, values, site);
+    const history = this.getEnvironmentHistory(save.id, save.year, save.season);
+    const calibration = scoreCalibratedEnvironment(
+      {
+        temperatureC: values.temperatureC,
+        humidity: values.humidity,
+        soilMoisture: values.soilMoisture,
+        lightLux: values.lightLux
+      },
+      site,
+      save.season,
+      PLANT_ENVIRONMENT_WEIGHTS,
+      history
+    );
+    // 植物本体辨识（物候/纹理/颜色）维持原口径，共 75 分；环境子项改为 v2 校准，共 25 分。
+    let identityScore = 0;
+    if (values.phenology === presentation.stage) identityScore += 40;
+    if (values.leafTexture === presentation.leafTexture) identityScore += 25;
+    if (normalizeColor(values.dominantColor) === normalizeColor(presentation.dominantColor)) identityScore += 10;
+    const score = round(identityScore + calibration.total, 1);
     const feedback = {
+      version: calibration.version,
       total: score,
       stageMatched: presentation.stage === values.phenology,
       leafMatched: presentation.leafTexture === values.leafTexture,
-      message: score >= 85 ? '记录细致，物候判断稳定。' : score >= 60 ? '记录已保存，部分环境读数仍可校准。' : '记录已保存，建议继续观察同一目标。'
+      colorMatched: normalizeColor(values.dominantColor) === normalizeColor(presentation.dominantColor),
+      identityScore,
+      calibration,
+      message: buildPlantFeedbackMessage(score, calibration)
     };
     const id = randomUUID();
     const createdAt = new Date().toISOString();
@@ -603,8 +639,8 @@ export class GameService {
       .prepare(
         `INSERT INTO observations
          (id, save_id, year, season, day, slot, site_id, species_id, kind, values_json,
-          score, feedback_json, note, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'plant', ?, ?, ?, ?, ?)`
+          score, feedback_json, note, score_version, calibration_json, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'plant', ?, ?, ?, ?, 'v2', ?, ?)`
       )
       .run(
         id,
@@ -619,6 +655,7 @@ export class GameService {
         score,
         JSON.stringify(feedback),
         values.note,
+        JSON.stringify(calibration),
         createdAt
       );
     this.consumeAction(save, 1);
@@ -626,8 +663,12 @@ export class GameService {
       event: {
         type: 'OBSERVE_PLANT',
         message: `完成${definition.name}观察记录`,
-        effects: [`观察评分 ${score}`, '消耗 1 个行动点'],
-        payload: { observationId: id, speciesId, score }
+        effects: [
+          `观察评分 ${score}`,
+          ...formatCalibrationEffects(calibration),
+          '消耗 1 个行动点'
+        ],
+        payload: { observationId: id, speciesId, score, scoreVersion: 'v2' }
       },
       evaluation: feedback
     };
@@ -642,18 +683,33 @@ export class GameService {
     if (!site) {
       throw new AppError('ACTION_NOT_ALLOWED', '当前区域环境状态缺失', 500);
     }
-    const score = scoreEnvironment(values, site);
+    const history = this.getEnvironmentHistory(save.id, save.year, save.season);
+    const calibration = scoreCalibratedEnvironment(
+      {
+        temperatureC: values.temperatureC,
+        humidity: values.humidity,
+        soilMoisture: values.soilMoisture,
+        lightLux: values.lightLux
+      },
+      site,
+      save.season,
+      ENVIRONMENT_WEIGHTS,
+      history
+    );
+    const score = calibration.total;
     const id = randomUUID();
     const feedback = {
+      version: calibration.version,
       total: score,
-      message: score >= 80 ? '环境读数与环境站数据接近。' : '环境读数已记录，建议结合仪器重新校准。'
+      calibration,
+      message: buildEnvironmentFeedbackMessage(calibration)
     };
     this.store.db
       .prepare(
         `INSERT INTO observations
          (id, save_id, year, season, day, slot, site_id, species_id, kind, values_json,
-          score, feedback_json, note, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 'environment', ?, ?, ?, ?, ?)`
+          score, feedback_json, note, score_version, calibration_json, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 'environment', ?, ?, ?, ?, 'v2', ?, ?)`
       )
       .run(
         id,
@@ -667,6 +723,7 @@ export class GameService {
         score,
         JSON.stringify(feedback),
         values.note,
+        JSON.stringify(calibration),
         new Date().toISOString()
       );
     this.consumeAction(save, 1);
@@ -674,8 +731,12 @@ export class GameService {
       event: {
         type: 'RECORD_ENVIRONMENT',
         message: '完成环境数据记录',
-        effects: [`环境评分 ${score}`, '消耗 1 个行动点'],
-        payload: { observationId: id, score }
+        effects: [
+          `环境评分 ${score}`,
+          ...formatCalibrationEffects(calibration),
+          '消耗 1 个行动点'
+        ],
+        payload: { observationId: id, score, scoreVersion: 'v2' }
       },
       evaluation: feedback
     };
@@ -804,11 +865,19 @@ export class GameService {
       throw new AppError('NO_ACTION_POINTS', '第 10 日必须完成全部行动后才能结算', 409);
     }
     const summary = this.closeSeason(save);
+    const effects = [
+      `观察 ${summary.observationCount} 次`,
+      `采集 ${summary.sampleCount} 次`,
+      `错误采集 ${summary.incorrectSamples} 次`
+    ];
+    if (summary.calibration) {
+      effects.push(formatCalibrationSummaryLine(summary.calibration));
+    }
     return {
       event: {
         type: 'END_SEASON',
         message: `${save.year} 年${SEASON_LABELS[save.season]}季结算完成`,
-        effects: [`观察 ${summary.observationCount} 次`, `采集 ${summary.sampleCount} 次`, `错误采集 ${summary.incorrectSamples} 次`],
+        effects,
         payload: { summary }
       },
       evaluation: summary
@@ -973,6 +1042,11 @@ export class GameService {
       changes.push('本季没有错误采集记录。');
     }
 
+    const calibration = this.collectCalibrationSummary(save.id, save.year, save.season);
+    if (calibration) {
+      changes.push(formatCalibrationSummaryLine(calibration));
+    }
+
     const summary: SeasonReview = {
       year: save.year,
       season: save.season,
@@ -980,7 +1054,8 @@ export class GameService {
       averageObservationScore: round(Number(observationStats.average), 1),
       sampleCount: Number(sampleStats.count),
       incorrectSamples: Number(sampleStats.incorrect),
-      changes
+      changes,
+      calibration
     };
 
     this.store.db
@@ -1090,6 +1165,23 @@ export class GameService {
     if (distributionChanges.some((item) => item.includes('濒危'))) {
       recommendations.push('对濒危区域停止剪取，优先执行降低干扰和保留种子区。');
     }
+
+    // 年度环境记录校准汇总（仅 v2 新口径；旧记录以 legacyCount 体现，不改变其分数）。
+    const calibration = this.collectCalibrationSummary(save.id, save.year);
+    if (calibration) {
+      if (calibration.weatherShockCount > 0) {
+        recommendations.push(
+          `全年有 ${calibration.weatherShockCount} 次记录在天气突变窗口内，建议在突变后复测以区分仪器滞后与真实变化。`
+        );
+      }
+      if (calibration.baselineAnchoredCount > 0) {
+        recommendations.push('部分读数由区域季节基线托底，下一年应在偏离基线的区域增设固定样方核对。');
+      }
+      if (calibration.averageScore < 70) {
+        recommendations.push('环境记录校准均分偏低，建议先核对仪器误差再记录温度、湿度与土壤水分。');
+      }
+    }
+
     if (recommendations.length < 2) {
       recommendations.push('保持固定样方和连续物候记录，以提高下一年度花期预报置信度。');
     }
@@ -1110,7 +1202,8 @@ export class GameService {
       distributionChanges: distributionChanges.length > 0 ? distributionChanges : ['本年度未发生跨等级分布状态变化。'],
       incorrectSamples,
       recommendations,
-      restorationUnlocked: false
+      restorationUnlocked: false,
+      calibration
     };
   }
 
@@ -1473,6 +1566,95 @@ export class GameService {
       ).count
     );
   }
+
+  /**
+   * 汇总指定年（可再限定季节）内 v2 校准环境记录。
+   * 返回 null 表示该时间范围没有任何观察记录（季节首帧尚未记录时）。
+   * 旧口径记录通过 legacyCount 计数，但其分数不参与平均，保证旧记录保原口径。
+   */
+  private collectCalibrationSummary(saveId: string, year: number, season?: Season): CalibrationSummary | null {
+    const clauses = ['save_id = ?', 'year = ?'];
+    const params: Array<string | number> = [saveId, year];
+    if (season) {
+      clauses.push('season = ?');
+      params.push(season);
+    }
+    const where = clauses.join(' AND ');
+    const rows = this.store.db
+      .prepare(
+        `SELECT site_id, score, score_version, calibration_json, day, season
+         FROM observations WHERE ${where}
+         ORDER BY day ASC`
+      )
+      .all(...params) as unknown as Array<{
+      site_id: SiteId;
+      score: number;
+      score_version: string | null;
+      calibration_json: string | null;
+      day: number;
+      season: Season;
+    }>;
+
+    if (rows.length === 0) {
+      return null;
+    }
+
+    let calibratedCount = 0;
+    let scoreSum = 0;
+    let weatherShockCount = 0;
+    let baselineAnchoredCount = 0;
+    let legacyCount = 0;
+    const shocks: string[] = [];
+    const bySiteMap = new Map<SiteId, { count: number; scoreSum: number }>();
+
+    for (const row of rows) {
+      if (String(row.score_version ?? 'v1') !== 'v2') {
+        legacyCount += 1;
+        continue;
+      }
+      const calibration = parseCalibration(String(row.calibration_json ?? ''));
+      if (!calibration) {
+        legacyCount += 1;
+        continue;
+      }
+      calibratedCount += 1;
+      scoreSum += Number(row.score);
+      const siteStats = bySiteMap.get(row.site_id) ?? { count: 0, scoreSum: 0 };
+      siteStats.count += 1;
+      siteStats.scoreSum += Number(row.score);
+      bySiteMap.set(row.site_id, siteStats);
+
+      if (calibration.weatherShock.active) {
+        weatherShockCount += 1;
+        shocks.push(
+          `${SEASON_LABELS[row.season]}季第 ${row.day} 日 ${SITES_BY_ID.get(row.site_id)?.name ?? row.site_id}`
+        );
+      }
+      if (calibration.baselineAnchoredMetrics.length > 0) {
+        baselineAnchoredCount += 1;
+      }
+    }
+
+    const bySite = SITES.filter((site) => bySiteMap.has(site.id)).map((site) => {
+      const stats = bySiteMap.get(site.id)!;
+      return {
+        siteId: site.id,
+        siteName: site.name,
+        count: stats.count,
+        averageScore: round(stats.scoreSum / Math.max(1, stats.count), 1)
+      };
+    });
+
+    return {
+      calibratedCount,
+      averageScore: calibratedCount > 0 ? round(scoreSum / calibratedCount, 1) : 0,
+      weatherShockCount,
+      baselineAnchoredCount,
+      bySite,
+      shocks: shocks.slice(0, 8),
+      legacyCount
+    };
+  }
 }
 
 function rowToSiteState(row: SiteStateRow): SiteState {
@@ -1508,32 +1690,78 @@ function rowToSpeciesState(row: SpeciesStateRow): SpeciesState {
   };
 }
 
-function scorePlantObservation(
-  presentation: ReturnType<typeof getPlantPresentation>,
-  values: Extract<GameCommand, { type: 'OBSERVE_PLANT' }>['values'],
-  site: SiteState
-): number {
-  let score = 0;
-  if (values.phenology === presentation.stage) score += 40;
-  if (values.leafTexture === presentation.leafTexture) score += 25;
-  if (normalizeColor(values.dominantColor) === normalizeColor(presentation.dominantColor)) score += 10;
-  if (Math.abs(values.temperatureC - site.temperatureC) <= 1) score += 8;
-  if (Math.abs(values.humidity - site.humidity) <= 5) score += 7;
-  if (Math.abs(values.soilMoisture - site.soilMoisture) <= 5) score += 5;
-  if (Math.abs(values.lightLux - site.lightLux) <= Math.max(2500, site.lightLux * 0.2)) score += 5;
-  return round(score, 1);
+const METRIC_LABELS: Record<EnvironmentMetricKey, string> = {
+  temperatureC: '温度',
+  humidity: '湿度',
+  soilMoisture: '土壤水分',
+  lightLux: '光照'
+};
+
+function buildEnvironmentFeedbackMessage(calibration: CalibrationResult): string {
+  if (calibration.weatherShock.active && calibration.total >= 60) {
+    return '天气突变已纳入校准，读数在仪器误差与突变放宽范围内。';
+  }
+  if (calibration.baselineAnchoredMetrics.length > 0 && calibration.total >= 55) {
+    return '读数偏离环境站瞬时值，但贴近区域季节基线，已按基线托底计分。';
+  }
+  return calibration.total >= 80
+    ? '环境读数与环境站数据接近，仪器误差范围内。'
+    : '环境读数已记录，建议结合仪器与区域基线重新校准。';
 }
 
-function scoreEnvironment(
-  values: Extract<GameCommand, { type: 'RECORD_ENVIRONMENT' }>['values'],
-  site: SiteState
-): number {
-  let score = 0;
-  if (Math.abs(values.temperatureC - site.temperatureC) <= 1) score += 30;
-  if (Math.abs(values.humidity - site.humidity) <= 5) score += 25;
-  if (Math.abs(values.soilMoisture - site.soilMoisture) <= 5) score += 25;
-  if (Math.abs(values.lightLux - site.lightLux) <= Math.max(2500, site.lightLux * 0.2)) score += 20;
-  return score;
+function buildPlantFeedbackMessage(score: number, calibration: CalibrationResult): string {
+  if (score >= 85) {
+    return '记录细致，物候判断稳定，环境读数在校准范围内。';
+  }
+  if (calibration.weatherShock.active) {
+    return '记录已保存，天气突变已纳入环境校准。';
+  }
+  return score >= 60 ? '记录已保存，部分环境读数仍可校准。' : '记录已保存，建议继续观察同一目标。';
+}
+
+/** 生成写入事件时间线的校准归因短语。 */
+function formatCalibrationEffects(calibration: CalibrationResult): string[] {
+  const effects: string[] = [];
+  if (calibration.weatherShock.active) {
+    const reasons: string[] = [];
+    if (calibration.weatherShock.severeWeather) reasons.push('剧烈天气');
+    if (calibration.weatherShock.transition) {
+      const drivers = calibration.weatherShock.drivers.map((driver) => METRIC_LABELS[driver.metric as EnvironmentMetricKey] ?? driver.metric);
+      reasons.push(`${[...new Set(drivers)].join('、')}跃变`);
+    }
+    effects.push(`天气突变放宽（${reasons.join('、')}）`);
+  }
+  if (calibration.baselineAnchoredMetrics.length > 0) {
+    const labels = calibration.baselineAnchoredMetrics.map((metric) => METRIC_LABELS[metric]).join('、');
+    effects.push(`区域基线托底：${labels}`);
+  }
+  if (effects.length === 0) {
+    effects.push('按仪器误差口径校准');
+  }
+  return effects;
+}
+
+function parseCalibration(value: string): CalibrationView | null {
+  if (!value) {
+    return null;
+  }
+  return parseJson<CalibrationView | null>(value, null);
+}
+
+/** 季节/年度结算面板上的一行校准归因概要。 */
+function formatCalibrationSummaryLine(summary: CalibrationSummary): string {
+  if (summary.calibratedCount === 0) {
+    return summary.legacyCount > 0 ? `环境记录沿用旧口径 ${summary.legacyCount} 条，未重算。` : '本时段暂无环境记录。';
+  }
+  const parts = [
+    `${summary.calibratedCount} 条新口径记录均分 ${summary.averageScore}`,
+    `天气突变 ${summary.weatherShockCount} 次`,
+    `区域基线托底 ${summary.baselineAnchoredCount} 次`
+  ];
+  if (summary.legacyCount > 0) {
+    parts.push(`旧口径 ${summary.legacyCount} 条保原口径`);
+  }
+  return `环境校准：${parts.join('，')}。`;
 }
 
 function normalizeColor(value: string): string {

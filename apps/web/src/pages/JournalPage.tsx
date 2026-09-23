@@ -1,9 +1,31 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { SEASONS, SEASON_LABELS, SLOT_LABELS, type Season } from '@shanhai/contracts';
+import {
+  SEASONS,
+  SEASON_LABELS,
+  SLOT_LABELS,
+  type CalibrationView,
+  type Season
+} from '@shanhai/contracts';
 import { api } from '../api.ts';
 import { useGame } from '../game-context.tsx';
+
+type EnvironmentMetricKey = 'temperatureC' | 'humidity' | 'soilMoisture' | 'lightLux';
+
+const METRIC_LABELS: Record<EnvironmentMetricKey, string> = {
+  temperatureC: '温度',
+  humidity: '湿度',
+  soilMoisture: '土壤',
+  lightLux: '光照'
+};
+
+const METRIC_UNITS: Record<EnvironmentMetricKey, string> = {
+  temperatureC: '°C',
+  humidity: '%',
+  soilMoisture: '%',
+  lightLux: ' lux'
+};
 
 export function JournalPage() {
   const { world } = useGame();
@@ -45,6 +67,11 @@ export function JournalPage() {
               <h2>{entry.kind === 'sample' ? '采集记录' : entry.kind === 'environment' ? '环境记录' : entry.speciesName}</h2>
               {entry.score !== null && <strong>{entry.score.toFixed(0)} 分</strong>}
             </div>
+            {entry.kind !== 'sample' && (
+              <p className="calibration-badge">
+                {entry.scoreVersion === 'v2' ? '校准口径 v2 · 仪器误差 / 天气突变 / 区域基线' : '旧口径 v1 · 固定阈值（保原口径）'}
+              </p>
+            )}
             {entry.kind === 'plant' && (
               <div className="journal-values">
                 <span>物候 {String(entry.details.phenology ?? '—')}</span>
@@ -67,6 +94,7 @@ export function JournalPage() {
                 </span>
               </div>
             )}
+            {entry.calibration && <CalibrationDetail calibration={entry.calibration} />}
             {entry.note && <p>{entry.note}</p>}
             <footer>
               <time>{new Date(entry.createdAt).toLocaleString('zh-CN', { hour12: false })}</time>
@@ -77,4 +105,44 @@ export function JournalPage() {
       </div>
     </div>
   );
+}
+
+function CalibrationDetail({ calibration }: { calibration: CalibrationView }) {
+  const shockDrivers = calibration.weatherShock.drivers.map((driver) => METRIC_LABELS[driver.metric as EnvironmentMetricKey] ?? driver.metric);
+  return (
+    <div className="calibration-detail">
+      <div className="calibration-flags">
+        <span className={calibration.weatherShock.active ? 'cal-flag active' : 'cal-flag'}>
+          天气突变{calibration.weatherShock.active ? `：${[...new Set(shockDrivers)].join('、')}${calibration.weatherShock.severeWeather ? '、剧烈天气' : ''}` : '：无'}
+        </span>
+        <span className={calibration.baselineAnchoredMetrics.length > 0 ? 'cal-flag active' : 'cal-flag'}>
+          区域基线{calibration.baselineAnchoredMetrics.length > 0 ? `托底：${calibration.baselineAnchoredMetrics.map((metric) => METRIC_LABELS[metric as EnvironmentMetricKey]).join('、')}` : '：未触发'}
+        </span>
+      </div>
+      <dl className="calibration-metrics">
+        {calibration.metrics.map((metric) => {
+          const key = metric.metric as EnvironmentMetricKey;
+          const anchored = metric.baselineCloseness > metric.fieldCloseness;
+          return (
+            <div key={metric.metric} className={anchored ? 'cal-metric anchored' : 'cal-metric'}>
+              <dt>{METRIC_LABELS[key] ?? metric.metric}</dt>
+              <dd>
+                读 {formatValue(metric.reading, key)} / 站 {formatValue(metric.station, key)} / 基线 {formatValue(metric.baseline, key)}
+                {METRIC_UNITS[key]}
+              </dd>
+              <dd className="cal-tolerance">
+                容差 ±{formatValue(metric.tolerance, key)}
+                {metric.weatherShock && metric.weatherAllowance > 0 ? `（含突变放宽 +${formatValue(metric.weatherAllowance, key)}）` : ''}
+              </dd>
+              <dd className="cal-score">{metric.awarded.toFixed(1)} / {metric.weight} 分</dd>
+            </div>
+          );
+        })}
+      </dl>
+    </div>
+  );
+}
+
+function formatValue(value: number, metric: EnvironmentMetricKey): string {
+  return metric === 'lightLux' ? Math.round(value).toLocaleString() : value.toFixed(1);
 }

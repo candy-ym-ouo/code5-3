@@ -38,6 +38,14 @@ const BASE_SOIL: Record<Season, number> = {
   winter: 52
 };
 
+/** 各季无天气折减前的基准光照（lux），供环境生成与区域基线共用。 */
+const SEASON_LIGHT_BASE: Record<Season, number> = {
+  spring: 39000,
+  summer: 46000,
+  autumn: 33000,
+  winter: 22000
+};
+
 const WEATHER_TEMPERATURE_OFFSET: Record<string, number> = {
   sunny: 1.8,
   cloudy: 0.4,
@@ -144,7 +152,7 @@ export function generateSiteState(
   );
 
   const lightLux = clamp(
-    (season === 'summer' ? 46000 : season === 'spring' ? 39000 : season === 'autumn' ? 33000 : 22000) *
+    SEASON_LIGHT_BASE[season] *
       site.lightMultiplier *
       (WEATHER_LIGHT_OFFSET[weather] ?? 0.8) *
       rng.between(0.86, 1.14),
@@ -625,6 +633,15 @@ export function round(value: number, digits = 0): number {
   const factorValue = 10 ** digits;
   return Math.round(value * factorValue) / factorValue;
 }
+
+// 环境校准（calibration.ts）复用的季节气候学基准。
+export {
+  BASE_TEMPERATURE,
+  BASE_HUMIDITY,
+  BASE_SOIL,
+  SEASON_LIGHT_BASE,
+  WEATHER_LIGHT_OFFSET as WEATHER_LIGHT_FACTOR
+};
 
 const SITE_NEIGHBORS: Record<SiteId, SiteId[]> = {
   foothill: ['mixed_forest', 'ridge'],

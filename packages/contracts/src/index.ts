@@ -162,6 +162,7 @@ export interface SeasonReview {
   sampleCount: number;
   incorrectSamples: number;
   changes: string[];
+  calibration?: CalibrationSummary | null;
 }
 
 export interface AnnualReview {
@@ -179,6 +180,25 @@ export interface AnnualReview {
   incorrectSamples: number;
   recommendations: string[];
   restorationUnlocked: boolean;
+  calibration?: CalibrationSummary | null;
+}
+
+/** 季节 / 年度层面的环境记录校准汇总（仅统计 v2 新口径记录）。 */
+export interface CalibrationSummary {
+  /** 参与汇总的 v2 环境类记录数（含植物观察的环境子项）。 */
+  calibratedCount: number;
+  /** v2 记录的平均校准分。 */
+  averageScore: number;
+  /** 触发天气突变放宽的记录数。 */
+  weatherShockCount: number;
+  /** 至少一个要素由区域基线托底的记录数。 */
+  baselineAnchoredCount: number;
+  /** 按区域统计的记录数。 */
+  bySite: Array<{ siteId: SiteId; siteName: string; count: number; averageScore: number }>;
+  /** 触发天气突变的时次描述（用于季节回顾与年报）。 */
+  shocks: string[];
+  /** 旧口径（v1）记录数，保证旧记录口径可追溯。 */
+  legacyCount: number;
 }
 
 export interface WorldSnapshot {
@@ -211,9 +231,50 @@ export interface JournalEntry {
   speciesId: string | null;
   speciesName: string | null;
   score: number | null;
+  /** 评分口径：旧记录为 v1（固定阈值），新记录为 v2（仪器/天气/区域基线校准）。 */
+  scoreVersion: 'v1' | 'v2';
   note: string;
   createdAt: string;
   details: Record<string, unknown>;
+  /** v2 口径下的校准明细；v1 旧记录为 null。 */
+  calibration: CalibrationView | null;
+}
+
+/** 下发给日志的校准明细（结构与 game-core 的 CalibrationResult 对齐）。 */
+export interface CalibrationView {
+  version: 'v2';
+  total: number;
+  weatherShock: {
+    active: boolean;
+    severeWeather: boolean;
+    transition: boolean;
+    drivers: Array<{ metric: string; delta: number; threshold: number }>;
+  };
+  baseline: {
+    siteId: SiteId;
+    season: Season;
+    temperatureC: number;
+    humidity: number;
+    soilMoisture: number;
+    lightLux: number;
+  };
+  baselineAnchoredMetrics: string[];
+  metrics: Array<{
+    metric: string;
+    reading: number;
+    station: number;
+    baseline: number;
+    instrumentTolerance: number;
+    weatherAllowance: number;
+    tolerance: number;
+    deviation: number;
+    weatherShock: boolean;
+    fieldCloseness: number;
+    baselineCloseness: number;
+    factor: number;
+    weight: number;
+    awarded: number;
+  }>;
 }
 
 export interface ApiErrorShape {
