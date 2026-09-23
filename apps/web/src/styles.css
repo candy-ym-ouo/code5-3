@@ -342,6 +342,8 @@ input[type="color"] { width: 46px; min-height: 38px; padding: .15rem; }
 .journal-title strong { color: var(--orange); }
 .journal-values { display: flex; flex-wrap: wrap; gap: .4rem; margin: .9rem 0; }
 .journal-values span { padding: .32rem .5rem; border: 1px solid var(--line); border-radius: 99px; color: #4c5e52; font-size: .72rem; background: rgba(255, 255, 255, .6); }
+.journal-values.calibration-tags { margin: -.4rem 0 .9rem; }
+.journal-values.calibration-tags span { border-style: dashed; color: #587067; background: rgba(88, 130, 141, .08); }
 .journal-card p { color: #4f5b53; line-height: 1.65; }
 .journal-card footer { align-items: center; margin-top: auto; padding-top: .9rem; border-top: 1px dashed var(--line); font-size: .72rem; }
 .journal-card footer time { color: var(--muted); }

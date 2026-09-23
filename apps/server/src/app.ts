@@ -157,6 +157,10 @@ export function createApp(options: CreateAppOptions = {}) {
     res.json(service.getAnnualReport(res.locals.sessionId as string, parameter(req, 'saveId'), year));
   });
 
+  app.get('/api/save/:saveId/calibration/verify', requireSession, (req, res) => {
+    res.json(service.verifyEnvironmentCalibration(res.locals.sessionId as string, parameter(req, 'saveId')));
+  });
+
   app.get('/api/save/:saveId/events', requireSession, (req, res) => {
     const world = service.getWorld(res.locals.sessionId as string, parameter(req, 'saveId'));
     res.json({ events: world.recentEvents });

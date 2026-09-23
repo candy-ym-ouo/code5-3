@@ -63,6 +63,30 @@ export function ReportPage() {
         </div>
       </section>
 
+      {data.environmentCalibration && data.environmentCalibration.recordCount > 0 && (
+        <section className="document-section">
+          <div className="section-heading">
+            <div><p className="eyebrow">ENVIRONMENT CALIBRATION</p><h2>环境记录校准</h2></div>
+            <span>仪器误差 · 天气突变 · 区域基线已纳入评分</span>
+          </div>
+          <div className="report-overview">
+            <div className="big-number">
+              <span>环境记录平均评分</span>
+              <strong className={data.environmentCalibration.averageScore < 60 ? 'negative' : 'positive'}>
+                {data.environmentCalibration.averageScore.toFixed(1)}
+              </strong>
+            </div>
+            <div className="report-callout">
+              <span>校准口径</span>
+              <strong>
+                {data.environmentCalibration.recordCount} 条记录 · v2 校准 {data.environmentCalibration.calibratedRecordCount} 条
+                {data.environmentCalibration.legacyRecordCount > 0 && ` · 旧口径 ${data.environmentCalibration.legacyRecordCount} 条`}
+              </strong>
+            </div>
+          </div>
+        </section>
+      )}
+
       <section className="document-section">
         <div className="section-heading">
           <div><p className="eyebrow">POPULATION CHANGE</p><h2>物种年度变化</h2></div>

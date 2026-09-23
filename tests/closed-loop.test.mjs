@@ -61,6 +61,17 @@ try {
       note: '端到端闭环观察'
     }
   });
+  const currentEnvironment = world.sites.find((site) => site.current).environment;
+  await send({
+    type: 'RECORD_ENVIRONMENT',
+    values: {
+      temperatureC: currentEnvironment.temperatureC,
+      humidity: currentEnvironment.humidity,
+      soilMoisture: currentEnvironment.soilMoisture,
+      lightLux: currentEnvironment.lightLux,
+      note: '端到端环境校准记录'
+    }
+  });
   await send({ type: 'TAKE_SAMPLE', speciesId: 'prunus-davidiana', method: 'litter' });
 
   for (const expectedSeason of ['spring', 'summer', 'autumn', 'winter']) {
@@ -77,6 +88,8 @@ try {
   assert.equal(world.phase, 'year_review');
   assert.equal(world.annualReview.year, 1);
   assert.ok(world.annualReview.incorrectSamples > 0);
+  assert.ok(world.annualReview.environmentCalibration.recordCount >= 1);
+  assert.ok(world.annualReview.environmentCalibration.calibratedRecordCount >= 1);
   await send({ type: 'BEGIN_NEXT_YEAR' });
   assert.equal(world.year, 2);
   assert.equal(world.season, 'spring');
@@ -84,7 +97,11 @@ try {
 
   const report = await api(`/api/save/${world.saveId}/report/1`);
   assert.equal(report.year, 1);
-  console.log('Closed-loop E2E passed: create -> observe -> wrong sample -> four seasons -> report -> year 2');
+  const verification = await api(`/api/save/${world.saveId}/calibration/verify`);
+  assert.equal(verification.consistent, true);
+  assert.ok(verification.checked >= 1);
+  assert.ok(verification.byVersion['2'] >= 1);
+  console.log('Closed-loop E2E passed: create -> observe -> calibrate environment -> wrong sample -> four seasons -> report -> year 2');
 
   async function waitForServer() {
     const deadline = Date.now() + 15_000;

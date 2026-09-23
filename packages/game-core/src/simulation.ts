@@ -17,25 +17,14 @@ const SEASON_INDEX: Record<Season, number> = {
   winter: 3
 };
 
-const BASE_TEMPERATURE: Record<Season, number> = {
-  spring: 16,
-  summer: 26,
-  autumn: 17,
-  winter: 5
-};
-
-const BASE_HUMIDITY: Record<Season, number> = {
-  spring: 62,
-  summer: 78,
-  autumn: 66,
-  winter: 55
-};
-
-const BASE_SOIL: Record<Season, number> = {
-  spring: 58,
-  summer: 65,
-  autumn: 57,
-  winter: 52
+export const SEASONAL_ENVIRONMENT_BASE: Record<
+  Season,
+  { temperatureC: number; humidity: number; soilMoisture: number; lightLux: number }
+> = {
+  spring: { temperatureC: 16, humidity: 62, soilMoisture: 58, lightLux: 39000 },
+  summer: { temperatureC: 26, humidity: 78, soilMoisture: 65, lightLux: 46000 },
+  autumn: { temperatureC: 17, humidity: 66, soilMoisture: 57, lightLux: 33000 },
+  winter: { temperatureC: 5, humidity: 55, soilMoisture: 52, lightLux: 22000 }
 };
 
 const WEATHER_TEMPERATURE_OFFSET: Record<string, number> = {
@@ -118,7 +107,8 @@ export function generateSiteState(
 
   const yearWarming = (year - 1) * 0.22;
   const dailyNoise = rng.between(-1.8, 1.8);
-  let temperatureC = BASE_TEMPERATURE[season] + site.temperatureOffset + yearWarming + dailyNoise;
+  let temperatureC =
+    SEASONAL_ENVIRONMENT_BASE[season].temperatureC + site.temperatureOffset + yearWarming + dailyNoise;
   temperatureC += WEATHER_TEMPERATURE_OFFSET[weather] ?? 0;
 
   if (weather === 'snow' && temperatureC > 2) {
@@ -126,7 +116,7 @@ export function generateSiteState(
   }
 
   const humidity = clamp(
-    BASE_HUMIDITY[season] +
+    SEASONAL_ENVIRONMENT_BASE[season].humidity +
       site.humidityOffset +
       rng.between(-7, 7) +
       (weather.includes('rain') ? 12 : weather === 'fog' ? 9 : 0),
@@ -135,7 +125,7 @@ export function generateSiteState(
   );
 
   const soilMoisture = clamp(
-    BASE_SOIL[season] +
+    SEASONAL_ENVIRONMENT_BASE[season].soilMoisture +
       site.soilMoistureOffset +
       rng.between(-5, 5) +
       (weather === 'heavy_rain' ? 14 : weather === 'light_rain' ? 7 : 0),
@@ -144,7 +134,7 @@ export function generateSiteState(
   );
 
   const lightLux = clamp(
-    (season === 'summer' ? 46000 : season === 'spring' ? 39000 : season === 'autumn' ? 33000 : 22000) *
+    SEASONAL_ENVIRONMENT_BASE[season].lightLux *
       site.lightMultiplier *
       (WEATHER_LIGHT_OFFSET[weather] ?? 0.8) *
       rng.between(0.86, 1.14),

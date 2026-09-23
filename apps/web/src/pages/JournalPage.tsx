@@ -59,6 +59,22 @@ export function JournalPage() {
                 <span>土壤 {String(entry.details.soilMoisture)}%</span>
               </div>
             )}
+            {entry.kind === 'environment' && entry.calibration && (
+              <div className="journal-values calibration-tags">
+                <span>校准 v{entry.calibration.version}</span>
+                {entry.calibration.components.length > 0 && (
+                  <span>
+                    仪器误差带内{' '}
+                    {entry.calibration.components.filter((component) => component.delta <= component.instrumentError).length}
+                    /{entry.calibration.components.length} 项
+                  </span>
+                )}
+                {entry.calibration.weatherAnomaly && entry.calibration.weatherAnomaly.shift > 0 && (
+                  <span>天气突变补偿 {Math.round(entry.calibration.weatherAnomaly.shift * 100)}%</span>
+                )}
+                {entry.calibration.regionalBaseline && <span>区域基线已纳入</span>}
+              </div>
+            )}
             {entry.kind === 'sample' && (
               <div className="journal-values">
                 <span>{String(entry.details.methodLabel)}</span>

@@ -20,6 +20,13 @@ export class Store {
     if (!columns.some((column) => column.name === 'slot')) {
       this.db.exec('ALTER TABLE samples ADD COLUMN slot INTEGER NOT NULL DEFAULT 1');
     }
+    const observationColumns = this.db
+      .prepare('PRAGMA table_info(observations)')
+      .all() as unknown as Array<{ name: string }>;
+    if (!observationColumns.some((column) => column.name === 'calibration_version')) {
+      // 存量环境记录保持 v1 原始口径，新记录显式写入当前版本。
+      this.db.exec('ALTER TABLE observations ADD COLUMN calibration_version INTEGER NOT NULL DEFAULT 1');
+    }
   }
 
   transaction<T>(operation: () => T): T {

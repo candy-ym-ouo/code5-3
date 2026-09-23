@@ -164,6 +164,54 @@ export interface SeasonReview {
   changes: string[];
 }
 
+export interface EnvironmentCalibrationComponent {
+  metric: 'temperatureC' | 'humidity' | 'soilMoisture' | 'lightLux';
+  label: string;
+  expected: number;
+  actual: number;
+  delta: number;
+  instrumentError: number;
+  tolerance: number;
+  score: number;
+  maxScore: number;
+}
+
+export interface EnvironmentCalibration {
+  version: number;
+  total: number;
+  components: EnvironmentCalibrationComponent[];
+  weatherAnomaly: {
+    shift: number;
+    weatherChanged: boolean;
+    temperatureJump: number;
+  } | null;
+  regionalBaseline: {
+    temperatureC: number;
+    humidity: number;
+    soilMoisture: number;
+    lightLux: number;
+  } | null;
+}
+
+export interface EnvironmentCalibrationSummary {
+  recordCount: number;
+  averageScore: number;
+  calibratedRecordCount: number;
+  legacyRecordCount: number;
+}
+
+export interface EnvironmentCalibrationVerification {
+  checked: number;
+  consistent: boolean;
+  byVersion: Record<string, number>;
+  mismatches: Array<{
+    id: string;
+    version: number;
+    storedScore: number;
+    computedScore: number;
+  }>;
+}
+
 export interface AnnualReview {
   year: number;
   headline: string;
@@ -179,6 +227,7 @@ export interface AnnualReview {
   incorrectSamples: number;
   recommendations: string[];
   restorationUnlocked: boolean;
+  environmentCalibration?: EnvironmentCalibrationSummary;
 }
 
 export interface WorldSnapshot {
@@ -214,6 +263,7 @@ export interface JournalEntry {
   note: string;
   createdAt: string;
   details: Record<string, unknown>;
+  calibration?: EnvironmentCalibration | null;
 }
 
 export interface ApiErrorShape {
